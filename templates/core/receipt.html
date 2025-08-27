@@ -1,0 +1,119 @@
+{% extends 'core/base.html' %}
+{% block content %}
+
+<style>
+  /* --- Receipt card polish --- */
+  .receipt-wrap { max-width: 760px; }
+  .receipt-card { border-radius: 14px; border: 1px solid rgba(0,0,0,.06); }
+  .brand-chip {
+    display:inline-grid; place-items:center; width:36px; height:36px;
+    border-radius:10px; color:#fff; font-weight:700;
+    background: linear-gradient(135deg, #0d6efd, #20c997);
+  }
+  .num { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .table-items thead th { color:#6b7280; font-weight:600; border-bottom-color:rgba(0,0,0,.06); }
+  .table-items tbody td { vertical-align: middle; }
+  .summary-row { display:flex; justify-content:space-between; gap:1rem; }
+  .summary-row + .summary-row { margin-top:.25rem; }
+  .summary-total { font-size:1.15rem; font-weight:700; }
+  .print-btn svg { width:18px; height:18px; }
+
+  /* --- Print styles --- */
+  @media print {
+    nav, .btn-back, .print-btn, .alert, .navbar, .navbar-elevated { display:none !important; }
+    .receipt-card { box-shadow:none !important; border:0; }
+    body { background:#fff !important; }
+    .container, .receipt-wrap { max-width: 900px !important; }
+  }
+</style>
+
+<div class="container my-4 receipt-wrap">
+  <div class="card shadow-sm receipt-card">
+    <div class="card-header bg-white d-flex align-items-center justify-content-between py-3">
+      <div class="d-flex align-items-center gap-3">
+        <span class="brand-chip">AB</span>
+        <div>
+          <div class="fw-bold">Alvarez Bakery</div>
+          <div class="text-secondary small">Receipt — <span class="text-body">Sale #{{ sale.id }}</span></div>
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-outline-secondary btn-sm print-btn" onclick="window.print()" title="Print">
+        <!-- printer icon -->
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 9V4h12v5h2a2 2 0 0 1 2 2v5h-4v4H6v-4H2v-5a2 2 0 0 1 2-2h2Zm2-3h8v3H8V6Zm8 12v-4H8v4h8Zm3-7a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg>
+        <span class="ms-1">Print</span>
+      </button>
+    </div>
+
+    <div class="card-body">
+      <div class="row g-2 mb-2">
+        <div class="col-md">
+          <div class="text-secondary small">Date &amp; time</div>
+          <div class="fw-semibold">{{ sale.created_at|date:"M j, Y, g:i a" }}</div>
+        </div>
+        <div class="col-md">
+          <div class="text-secondary small">Cashier</div>
+          <div class="fw-semibold">{{ sale.cashier.username }}</div>
+        </div>
+        {% if sale.payment_method %}
+        <div class="col-md">
+          <div class="text-secondary small">Payment</div>
+          <span class="badge rounded-pill bg-info-subtle text-info fw-semibold">
+            {{ sale.payment_method|title|cut:"_" }}
+          </span>
+        </div>
+        {% endif %}
+      </div>
+
+      <hr class="my-3">
+
+      <div class="table-responsive">
+        <table class="table table-sm table-items mb-0">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th class="text-end" style="width:120px;">Qty</th>
+              <th class="text-end" style="width:140px;">Unit</th>
+              <th class="text-end" style="width:160px;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for it in sale.items.all %}
+              <tr>
+                <td class="fw-semibold">{{ it.product.name }}</td>
+                <td class="text-end num">{{ it.qty }}</td>
+                <td class="text-end num">₱{{ it.unit_price|floatformat:2 }}</td>
+                <td class="text-end num">₱{{ it.line_total|floatformat:2 }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <hr class="my-3">
+
+      <div class="summary-row">
+        <div class="text-secondary">Subtotal</div>
+        <div class="num">₱{{ sale.total_amount|add:sale.discount|floatformat:2 }}</div>
+      </div>
+      <div class="summary-row">
+        <div>Discount</div>
+        <div class="num">₱{{ sale.discount|floatformat:2 }}</div>
+      </div>
+      <div class="summary-row mt-2">
+        <div class="summary-total">Total</div>
+        <div class="summary-total num">₱{{ sale.total_amount|floatformat:2 }}</div>
+      </div>
+
+      <div class="text-center text-secondary small mt-4">Thank you!</div>
+
+      <div class="text-center mt-3">
+        <a class="btn btn-outline-primary btn-back" href="/pos/">
+          ← Back to POS
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

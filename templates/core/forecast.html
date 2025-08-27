@@ -1,0 +1,248 @@
+{% extends 'core/base.html' %}
+{% block content %}
+
+<style>
+  :root{
+    --ab-border: rgba(16,24,40,.08);
+    --ab-soft: rgba(13,110,253,.08);
+  }
+  .kpi-card{border-radius:16px;border:1px solid var(--ab-border);box-shadow:0 10px 24px rgba(16,24,40,.06);background:#fff}
+  .panel-title{font-weight:800;letter-spacing:.2px}
+  .muted{color:#6b7280}
+  .num{font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  .pill{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--ab-border);border-radius:999px;padding:.25rem .6rem;background:#fff}
+  .pill .dot{width:10px;height:10px;border-radius:50%}
+  .dot-blue{background:#0d6efd}
+  .dot-green{background:#20c997}
+
+  .mini-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem}
+  .mini-kpis .k{border:1px solid var(--ab-border);border-radius:12px;padding:.75rem .9rem;background:linear-gradient(180deg,#fff,#fbfcff)}
+  .mini-kpis .k .label{font-size:.8rem;color:#6b7280}
+  .mini-kpis .k .value{font-size:1.05rem;font-weight:700}
+
+  .table thead th{color:#6b7280;border-bottom-color:var(--ab-border);background:#fbfcff;position:sticky;top:0;z-index:2}
+  .table-hover>tbody>tr:hover>*{background:#fafbff}
+
+  .empty{
+    text-align:center;padding:2.25rem 1rem;color:#6b7280;
+    background:linear-gradient(180deg,#fff,#fbfcff);border:1px dashed var(--ab-border);border-radius:12px
+  }
+
+  @media(max-width: 991px){.stack{margin-top:1rem}.mini-kpis{grid-template-columns:1fr}}
+</style>
+
+<div class="row g-4">
+  <!-- Left: Chart -->
+  <div class="col-lg-8">
+    <div class="card kpi-card p-3 p-md-4">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+        <h5 class="panel-title mb-0">Daily Revenue (last 60 days) &amp; 7-day Moving Average Forecast</h5>
+        <div class="d-flex align-items-center gap-2">
+          <span class="pill"><span class="dot dot-blue"></span><span class="muted">Revenue</span></span>
+          <span class="pill"><span class="dot dot-green"></span><span class="muted">Forecast (MA7)</span></span>
+        </div>
+      </div>
+
+      <!-- quick KPIs computed from the same data (no backend changes) -->
+      <div class="mini-kpis mb-3" id="miniKPIs" style="display:none">
+        <div class="k">
+          <div class="label">Total (period)</div>
+          <div class="value num" id="kTotal">—</div>
+        </div>
+        <div class="k">
+          <div class="label">Average / day</div>
+          <div class="value num" id="kAvg">—</div>
+        </div>
+        <div class="k">
+          <div class="label">Best day</div>
+          <div class="value"><span class="num" id="kBestVal">—</span> <span class="muted" id="kBestWhen"></span></div>
+        </div>
+      </div>
+
+      <div id="chartWrap">
+        <canvas id="histChart" height="120"></canvas>
+      </div>
+      <div id="chartEmpty" class="empty" style="display:none">
+        <svg width="32" height="32" viewBox="0 0 24 24" class="mb-2" fill="currentColor" style="opacity:.5"><path d="m13 4l-3 7l-2-2l-6 9h20l-7-10l-2 3z"/></svg>
+        <div>No data for this window.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Top sellers + NEW graph -->
+  <div class="col-lg-4 stack">
+    <div class="card kpi-card p-3 p-md-4">
+      <h5 class="panel-title mb-2">Top Sellers (last 60 days)</h5>
+      {% if top %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th class="text-end">Qty</th>
+              <th class="text-end">Revenue</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in top %}
+              <tr>
+                <td class="fw-semibold">{{ r.product }}</td>
+                <td class="text-end num">{{ r.qty }}</td>
+                <td class="text-end num">₱{{ r.revenue|floatformat:2 }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <div class="empty">No top-seller data yet.</div>
+      {% endif %}
+    </div>
+
+    {% if top %}
+    <!-- NEW: Doughnut graph for revenue share -->
+    <div class="card kpi-card p-3 p-md-4 mt-3">
+      <h5 class="panel-title mb-2">Revenue Share (top sellers)</h5>
+      <canvas id="mixChart" height="160"></canvas>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{# SAFELY embed JSON for JS #}
+{{ history|json_script:"hist-json" }}
+{{ forecast_points|json_script:"fc-json" }}
+{{ top|json_script:"top-json" }}
+
+<script>
+  // ----- Data -----
+  const histData = JSON.parse(document.getElementById('hist-json').textContent || '[]');
+  const fcPoints = JSON.parse(document.getElementById('fc-json').textContent || '[]');
+
+  const labels   = histData.map(h => h.date);
+  const values   = histData.map(h => Number(h.revenue || 0));
+  const fcLabels = fcPoints.map(p => `D+${p.day}`);
+  const fcValues = fcPoints.map(p => Number(p.forecast || 0));
+
+  const pesoFmt = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
+
+  // ----- Empty / KPIs -----
+  const hasData = values.length > 0;
+  document.getElementById('chartWrap').style.display  = hasData ? '' : 'none';
+  document.getElementById('chartEmpty').style.display = hasData ? 'none' : '';
+  document.getElementById('miniKPIs').style.display   = hasData ? '' : 'none';
+
+  if (hasData) {
+    const total = values.reduce((a,b)=>a+b,0);
+    const avg   = total / values.length;
+    let bestVal = -Infinity, bestIdx = -1;
+    values.forEach((v,i)=>{ if (v>bestVal){ bestVal=v; bestIdx=i; } });
+
+    document.getElementById('kTotal').textContent   = pesoFmt.format(total);
+    document.getElementById('kAvg').textContent     = pesoFmt.format(avg);
+    document.getElementById('kBestVal').textContent = pesoFmt.format(bestVal);
+    document.getElementById('kBestWhen').textContent= bestIdx>=0 ? `(${labels[bestIdx]})` : '';
+  }
+
+  // ----- Main chart -----
+  if (hasData) {
+    const ctx  = document.getElementById('histChart').getContext('2d');
+    const grad = ctx.createLinearGradient(0,0,0,220);
+    grad.addColorStop(0,'rgba(13,110,253,.22)');
+    grad.addColorStop(1,'rgba(13,110,253,0)');
+
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels.concat(fcLabels),
+        datasets: [
+          {
+            label: 'Revenue',
+            data: values.concat(Array(fcValues.length).fill(null)),
+            borderColor: '#0d6efd',
+            backgroundColor: grad,
+            fill: true,
+            borderWidth: 2,
+            tension: .35,
+            pointRadius: 0,
+            hoverRadius: 3
+          },
+          {
+            label: 'Forecast (MA7)',
+            data: Array(values.length).fill(null).concat(fcValues),
+            borderColor: '#20c997',
+            backgroundColor: '#20c997',
+            borderDash: [6,4],
+            fill: false,
+            borderWidth: 2,
+            tension: .25,
+            pointRadius: 0,
+            hoverRadius: 3
+          }
+        ]
+      },
+      options: {
+        maintainAspectRatio: false,
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            padding: 10,
+            displayColors: false,
+            callbacks: {
+              title: items => items?.[0]?.label ?? '',
+              label:  ti   => `${ti.dataset.label}: ${pesoFmt.format(ti.raw || 0)}`
+            }
+          }
+        },
+        scales: {
+          x: { grid: { display:false } },
+          y: {
+            ticks: { callback: v => pesoFmt.format(v).replace('PHP','₱') },
+            grid: { color:'rgba(0,0,0,.06)', drawBorder:false }
+          }
+        }
+      }
+    });
+  }
+
+  // ----- NEW: Revenue Share (Doughnut) -----
+  (function(){
+    const el = document.getElementById('mixChart');
+    if (!el) return; // top may be empty, so the card isn't rendered
+
+    const topData = JSON.parse(document.getElementById('top-json').textContent || '[]');
+    const mixLabels = topData.map(t => t.product);
+    const mixValues = topData.map(t => Number(t.revenue || 0));
+
+    if (!mixValues.length) return;
+
+    // soft palette that matches the UI
+    const colors = [
+      '#0d6efd','#20c997','#6f42c1','#fd7e14','#dc3545',
+      '#198754','#0dcaf0','#6610f2','#ffc107','#6c757d'
+    ].slice(0, mixValues.length);
+
+    new Chart(el.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: mixLabels,
+        datasets: [{ data: mixValues, backgroundColor: colors, hoverOffset: 6 }]
+      },
+      options: {
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (ti) => `${ti.label}: ${pesoFmt.format(ti.raw || 0)}`
+            }
+          }
+        },
+        cutout: '62%'
+      }
+    });
+  })();
+</script>
+{% endblock %}
